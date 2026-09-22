@@ -16,7 +16,7 @@
 
 | 周次 | 工具 | 说明 |
 |---|---|---|
-| 2026-W39 | [索引](MINI-TOOLS/README.md) | 首期 |
+| 2026-W39 | [Token 速算器](MINI-TOOLS/2026-W39-token-estimator/) | LLM 文本 Token 与费用估算(零依赖纯静态 HTML) |
 
 - 内容:每周一个实用单文件小工具(优先纯静态 HTML,零依赖)
 - 每个工具独立目录 `MINI-TOOLS/2026-Wxx-名称/`,内含 `index.html` 或脚本 + 简短说明

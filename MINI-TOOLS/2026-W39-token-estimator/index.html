@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token 速算器 — LLM 文本 Token 与费用估算</title>
+<style>
+  :root{ --bg:#faf6f0; --card:#ffffff; --ink:#3a322a; --sub:#8a7f70; --accent:#c97b4a; --accent-soft:#f3e3d5; --ok:#3e8e5a; --line:#eae0d4; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{background:var(--bg); color:var(--ink); font:15px/1.7 "Segoe UI","Microsoft YaHei",sans-serif; padding:28px 16px 60px;}
+  .wrap{max-width:980px; margin:0 auto;}
+  header{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:18px;}
+  h1{font-size:24px; font-weight:600;}
+  h1 small{display:block; font-size:13px; color:var(--sub); font-weight:400; margin-top:2px;}
+  #selftest{font-size:13px; padding:6px 14px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-weight:600; white-space:nowrap;}
+  #selftest.ok{background:#e3f2e9; color:var(--ok);}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(60,45,20,.05);}
+  .card h2{font-size:15px; color:var(--sub); font-weight:600; margin-bottom:12px; letter-spacing:.5px;}
+  textarea{width:100%; min-height:180px; border:1px solid var(--line); border-radius:10px; padding:12px 14px; font:14px/1.6 Consolas,"Microsoft YaHei",monospace; resize:vertical; background:#fffdf9; color:var(--ink);}
+  textarea:focus{outline:2px solid var(--accent-soft); border-color:var(--accent);}
+  .row{display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; align-items:center;}
+  button{cursor:pointer; border:none; border-radius:999px; padding:8px 20px; font-size:14px; background:var(--accent); color:#fff; font-weight:600;}
+  button.ghost{background:var(--accent-soft); color:var(--accent);}
+  .nums{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px;}
+  .num{background:#fffdf9; border:1px solid var(--line); border-radius:10px; padding:12px 14px;}
+  .num b{font-size:22px; font-weight:700; display:block;}
+  .num span{font-size:12px; color:var(--sub);}
+  .tokens{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;}
+  .tokens .big{font-size:34px; font-weight:700; color:var(--accent);}
+  .kv{font-size:13px; color:var(--sub); display:flex; gap:6px; align-items:center;}
+  .kv input{width:64px; border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:13px; background:#fff;}
+  table{width:100%; border-collapse:collapse; font-size:14px;}
+  th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--line);}
+  th{color:var(--sub); font-weight:600; font-size:13px;}
+  td.n,th.n{text-align:right;}
+  .bar{height:10px; background:var(--accent-soft); border-radius:999px; overflow:hidden; min-width:60px;}
+  .bar i{display:block; height:100%; background:var(--accent); border-radius:999px; transition:width .3s;}
+  .tip{font-size:12.5px; color:var(--sub); margin-top:12px;}
+  .tip code{background:var(--accent-soft); padding:1px 6px; border-radius:5px; color:var(--accent); font-size:12px;}
+  @media (max-width:640px){ h1{font-size:20px;} .big{font-size:28px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Token 速算器<small>LLM 文本 Token 与调用费用估算 · 纯本地运行,数据不出浏览器</small></h1>
+    <div id="selftest">自检运行中…</div>
+  </header>
+
+  <div class="card">
+    <h2>① 粘贴文本</h2>
+    <textarea id="src" placeholder="把要发给大模型的提示词 / 文档内容粘贴到这里:换行会忽略,支持中英混排。"></textarea>
+    <div class="row">
+      <button id="btnSample">填入示例</button>
+      <button id="btnClear" class="ghost">清空</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② 统计</h2>
+    <div class="nums">
+      <div class="num"><b id="nTotal">0</b><span>总字符数</span></div>
+      <div class="num"><b id="nCjk">0</b><span>汉字数</span></div>
+      <div class="num"><b id="nWord">0</b><span>英文单词数</span></div>
+      <div class="num"><b id="nLine">0</b><span>行数</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>③ Token 估算</h2>
+    <div class="tokens">
+      <div class="big" id="tokVal">0</div>
+      <div class="kv">英文系数 <input id="enPer" type="number" step="0.1" min="1" value="4" title="平均每 token 对应的英文字符数(约 3~5)"> 字符/token</div>
+      <div class="kv">中文系数 <input id="zhPer" type="number" step="0.1" min="0.5" value="1.2" title="平均每个汉字对应的 token 数(约 1~2)"> token/字</div>
+    </div>
+    <p class="tip">估算规则(启发式近似,非官方分词):<code>token ≈ 汉字数 × 中文系数 + 其余字符数 ÷ 英文系数</code>。同一文本在不同模型的实际分词结果可能偏差 ±30%,用于粗算额度与成本足够。</p>
+  </div>
+
+  <div class="card">
+    <h2>④ 按模型估算费用(输入 1 次)</h2>
+    <table>
+      <thead><tr><th>模型</th><th class="n">输入 $/1M token</th><th class="n">输出 $/1M token</th><th class="n">本次输入费用</th><th>对比</th></tr></thead>
+      <tbody id="modelRows"></tbody>
+    </table>
+    <p class="tip">单价为常见公开价,仅供参考,可自行在页面内 JS 中修改。费用 = token 数 ÷ 1,000,000 × 输入单价。</p>
+  </div>
+</div>
+<script>
+"use strict";
+// ---------- 模型单价(美元/百万 token),可自行增删改 ----------
+var MODELS = [
+  {name:"DeepSeek-V3",   in:0.27,  out:1.10},
+  {name:"DeepSeek-R1",   in:0.55,  out:2.19},
+  {name:"GPT-4o-mini",   in:0.15,  out:0.60},
+  {name:"GPT-4o",        in:2.50,  out:10.00},
+  {name:"Claude Sonnet 4", in:3.00, out:15.00},
+  {name:"Qwen-Max",      in:1.20,  out:4.00}
+];
+
+// ---------- 核心估算函数 ----------
+function estimateTokens(text, enPer, zhPer){
+  if(!text) return 0;
+  var cjk = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+  var other = text.length - cjk;
+  return cjk * zhPer + other / enPer;
+}
+function countWords(text){ return (text.match(/[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*/g) || []).length; }
+function fmtN(n){ return Math.round(n).toLocaleString("zh-CN"); }
+function fmt$ (n){ return n < 0.01 ? "$" + n.toFixed(5) : "$" + n.toFixed(4); }
+
+// ---------- 渲染 ----------
+function refresh(){
+  var text = document.getElementById("src").value;
+  var enPer = parseFloat(document.getElementById("enPer").value) || 4;
+  var zhPer = parseFloat(document.getElementById("zhPer").value) || 1.2;
+
+  document.getElementById("nTotal").textContent = fmtN(text.length);
+  document.getElementById("nCjk").textContent  = fmtN((text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g)||[]).length);
+  document.getElementById("nWord").textContent = fmtN(countWords(text));
+  document.getElementById("nLine").textContent = fmtN(text ? text.split(/\r\n|\r|\n/).length : 0);
+
+  var tok = estimateTokens(text, enPer, zhPer);
+  document.getElementById("tokVal").textContent = fmtN(tok);
+
+  var rows = "", maxCost = 1e-9, i, c;
+  var costs = MODELS.map(function(m){ return {m:m, c: tok / 1e6 * m.in}; });
+  for(i=0;i<costs.length;i++){ if(costs[i].c > maxCost) maxCost = costs[i].c; }
+  for(i=0;i<costs.length;i++){
+    c = costs[i];
+    var w = Math.max(2, Math.min(100, c.c / maxCost * 100));
+    rows += "<tr><td>" + c.m.name + "</td><td class=\"n\">" + c.m.in.toFixed(2) + "</td><td class=\"n\">" + c.m.out.toFixed(2) + "</td><td class=\"n\"><b>" + fmt$(c.c) + "</b></td><td><div class=\"bar\"><i style=\"width:" + w + "%\"></i></div></td></tr>";
+  }
+  document.getElementById("modelRows").innerHTML = rows;
+}
+// ---------- 示例文本 ----------
+var SAMPLE = "请从多模态推荐的角度,分析下面这段用户行为数据,并给出三条优化建议。\n\n用户 A 最近三天浏览了 12 个商品,其中 8 个是家居类,点击了 3 条视频讲解,收藏了 1 张风格图片,但没有产生购买。系统目前的召回策略以文本标签为主,对图片与视频内容的使用很少,导致相似视觉风格的商品漏召回。\n\nThis is a multi-modal recommendation scenario: text, image and video signals are all available, but only text features are being used.";
+
+// ---------- 自检(页面加载后自动执行,结果写入 #selftest 与标题) ----------
+function runSelfTest(){
+  var near = function(a,b){ return Math.abs(a-b) < 1e-9; };
+  var results = [
+    near(estimateTokens("hello world", 4, 1.2), 11/4),
+    near(estimateTokens("你好", 4, 1.2), 2*1.2),
+    near(estimateTokens("你好 world", 4, 1.2), 2*1.2 + 6/4),
+    near(estimateTokens("", 4, 1.2), 0),
+    near(estimateTokens("a", 4, 1.2), 0.25)
+  ];
+  var pass = results.filter(function(x){return x;}).length;
+  var el = document.getElementById("selftest");
+  if(pass === results.length){
+    el.textContent = "✓ 自检通过 " + pass + "/" + results.length;
+    el.className = "ok";
+    document.title = "[OK] " + document.title;
+    return true;
+  } else {
+    el.textContent = "✗ 自检失败 " + pass + "/" + results.length;
+    return false;
+  }
+}
+
+document.getElementById("src").addEventListener("input", refresh);
+document.getElementById("enPer").addEventListener("input", refresh);
+document.getElementById("zhPer").addEventListener("input", refresh);
+document.getElementById("btnSample").addEventListener("click", function(){ document.getElementById("src").value = SAMPLE; refresh(); });
+document.getElementById("btnClear").addEventListener("click", function(){ document.getElementById("src").value = ""; refresh(); });
+
+document.getElementById("src").value = "";
+refresh();
+runSelfTest();
+</script>
+</body>
+</html>
