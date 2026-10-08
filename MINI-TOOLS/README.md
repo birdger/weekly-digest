@@ -5,3 +5,4 @@
 | 周次 | 工具 | 说明 |
 |---|---|---|
 | 2026-W39 | [Token 速算器](2026-W39-token-estimator/) | 中英混排文本的 LLM Token 与调用费用估算(纯静态 HTML,内置自检) |
+| 2026-W40 | [arXiv 论文快整理](2026-W40-arxiv-organizer/) | 粘贴即抽取/去重 arXiv 编号,生成链接/Markdown 列表、逐篇打开、导出 TXT(纯静态 HTML,内置自检) |
